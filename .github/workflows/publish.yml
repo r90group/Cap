@@ -8,8 +8,8 @@ on:
     branches: [main]
 
 concurrency:
-  group: fork-publication-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-  cancel-in-progress: false
+  group: fork-publication-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -105,6 +105,7 @@ jobs:
           name: cap-${{ matrix.target }}
           path: publish/
           if-no-files-found: error
+          overwrite: true
 
   release:
     needs: build
@@ -200,7 +201,11 @@ jobs:
         shell: bash
         run: |
           cd artifacts
-          sha256sum -- * > SHA256SUMS
+          if [ "$RUNNER_OS" = macOS ]; then
+            shasum -a 256 -- * > SHA256SUMS
+          else
+            sha256sum -- * > SHA256SUMS
+          fi
 
       - name: Download published candidate
         if: github.event_name == 'workflow_run'
@@ -223,7 +228,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: smoke-${{ matrix.target }}
+          name: smoke-${{ matrix.target }}-${{ github.run_attempt }}
           path: smoke/
           if-no-files-found: error
 
