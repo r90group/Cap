@@ -35,7 +35,7 @@ Every merge to `main` whose push CI passes publishes the R90 fork desktop app au
 - macOS Apple Silicon (M1/M2/M3/M4): `*_aarch64.dmg`
 - Windows x64: `*_x64-setup.exe`
 
-The channel links to immutable, exact-revision release assets. Installer checksums, Tauri updater signatures, the updater public key, target/revision manifests, and the installed-app smoke run are linked from the release. Intel Mac builds are not supported by this fork's publication workflow.
+The channel links to immutable, exact-revision release assets. Installer checksums, Tauri updater signatures, the existing fork public key, target/revision manifests, and the installed-app smoke run are linked from the release. Intel Mac builds are not supported by this fork's publication workflow.
 
 ### First-launch warnings (expected)
 
@@ -48,20 +48,27 @@ These internal builds retain the fork's existing signing boundary: macOS bundles
 
 The [`publish` workflow](.github/workflows/publish.yml) follows successful **push** CI on `main`, checks out that exact revision, and builds macOS Apple Silicon and Windows x64 in parallel. No release dispatch, version bump, Discord interaction, or human approval is required.
 
-Pull requests build the same production configuration and install/launch the resulting artifacts without publishing. Publication verifies updater signatures before exposing a complete immutable candidate. Native smoke runners then download that published candidate, check its checksums and installed version, install it in a disposable directory, and launch the fresh-install `Welcome to Cap` window. Logs, screenshots and target/revision results are retained in attempt-specific workflow artifacts; screenshots still need visual inspection for the first observed release. Only both successful native walks advance `internal-latest`; a failed or cancelled walk withdraws the candidate and leaves the last healthy channel unchanged. Agent triage recovers a failed publication with **rerun all jobs**, which authenticates and completes the draft upload before republishing for smoke; no human release dispatch is required and already published healthy assets are not overwritten. Promotion failures restore the prior channel. The previous rolling release's files are retained under its exact-revision tag during cutover.
+Pull requests build the same production configuration and install/launch the resulting artifacts without publishing. Publication verifies updater signatures before exposing a complete immutable candidate. Native smoke runners then download that published candidate, check its checksums and installed version, install it in a disposable directory, and launch the fresh-install `Welcome to Cap` window. Logs, screenshots and target/revision results are retained in attempt-specific workflow artifacts; screenshots still need visual inspection for the first observed release. Only both successful native walks advance `internal-latest` and its static Tauri `latest.json` manifest. A failed or cancelled walk withdraws a new candidate and leaves the last healthy channel unchanged; a failed re-walk of the already healthy current candidate retains that earlier verified publication and still raises triage. Agent triage recovers a failed publication by re-running **all jobs** for the same revision, not by approving a release or rerunning only smoke against a withdrawn draft.
 
-The workflow publishes to **r90group/Cap GitHub Releases**, never upstream CrabNebula, upstream Discord, upstream signing services or upstream Sentry. It does not activate the upstream automatic-update channel. Each green revision gets its own immutable candidate and smoke; newer healthy revisions may supersede an intermediate channel promotion. First-launch Gatekeeper/SmartScreen consent and screen/microphone grants are not bypassed or exercised by this isolated, unquarantined startup smoke. Private recordings, authenticated uploads and the Railway runtime are outside this artifact-publication walk.
+The workflow publishes to **r90group/Cap GitHub Releases**, never upstream CrabNebula, upstream Discord, upstream signing services or upstream Sentry. Publication numbers generate strictly increasing stable native versions within Windows Installer bounds, including patch/minor rollover; the version is applied to the actual Tauri package and installer, not merely its filename. The fork-owned updater endpoint is `https://github.com/r90group/Cap/releases/download/internal-latest/latest.json`. Its exact source revision and version bind both smoke-healthy immutable updater artifacts, using signatures from the existing fork key. Promotion rejects a non-increasing version and reads back the real endpoint; a failed promotion restores the prior manifest and channel. Each green revision gets its own immutable candidate and smoke; newer healthy revisions may supersede an intermediate channel promotion.
+
+Legacy installers that embed upstream Cap's endpoint/public key must install the current fork installer once. This publication neither migrates their cryptographic trust remotely nor rotates or bypasses signing keys. First-launch Gatekeeper/SmartScreen consent and screen/microphone grants are not bypassed or exercised by this isolated, unquarantined startup smoke. Private recordings, authenticated uploads and the Railway runtime are outside this artifact-publication walk.
 
 Kaylee's triage engineer can restore a later-discovered regression to a previously smoke-verified revision using:
 
 ```bash
 REVISION=<previous-smoke-verified-full-sha>
+RESTORE_DIR=$(mktemp -d)
+gh release download "internal-$REVISION" --repo r90group/Cap --pattern latest.json --dir "$RESTORE_DIR"
+gh release upload internal-latest "$RESTORE_DIR/latest.json" --repo r90group/Cap --clobber
 gh api repos/r90group/Cap/git/refs/tags/internal-latest --method PATCH -f sha="$REVISION" -F force=true
 gh release edit internal-latest --repo r90group/Cap --title "Internal build ${REVISION:0:12}" --notes "Restored healthy build and downloads: https://github.com/r90group/Cap/releases/tag/internal-$REVISION"
 gh api repos/r90group/Cap/git/ref/tags/internal-latest --jq .object.sha
+gh release download internal-latest --repo r90group/Cap --pattern latest.json --output -
+rm -r "$RESTORE_DIR"
 ```
 
-Already installed copies are not silently replaced. Preserve the earlier immutable installers and signing identity.
+Restore only a prior smoke-verified fork manifest and its matching revision; pre-updater legacy archives have no such manifest. Already installed copies are not silently downgraded by a rollback. The next fixed publication has a newer generated version and is eligible for normal client updates. Preserve the earlier immutable installers and signing identity.
 
 Railway's existing GitHub App integration deploys application changes to the self-hosted runtime independently. Desktop publication does not change its services, credentials, database, migrations, or watch-path policy.
 

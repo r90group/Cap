@@ -8,8 +8,10 @@
 	},
 	"plugins": {
 		"updater": {
-			"active": false,
-			"endpoints": [],
+			"active": true,
+			"endpoints": [
+				"https://github.com/r90group/Cap/releases/download/internal-latest/latest.json"
+			],
 			"pubkey": ""
 		}
 	},
