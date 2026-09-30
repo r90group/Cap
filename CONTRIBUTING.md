@@ -35,7 +35,7 @@ Before anything else, make sure you have the following installed:
 
 Run `pnpm install`, then run `pnpm cap-setup` to install native dependencies such as FFmpeg.
 
-On Windows, Visual Studio's C++ and LLVM tools and VCPKG must be installed.
+On Windows, Visual Studio's C++ tools, standalone LLVM 20 on `PATH`, and VCPKG must be installed.
 On MacOS, cmake must be installed.
 `pnpm cap-setup` does not yet install these dependencies for you.
 
@@ -71,13 +71,12 @@ cargo clippy --workspace --all-features --locked --target "$RUST_TARGET_TRIPLE" 
 
 The setup target selects the matching native FFmpeg dependencies. The sidecar script builds and copies the real target-suffixed `cap-muxer` binary required by Tauri. Direct Cargo commands do not run Tauri's `beforeBuildCommand`; build the desktop frontend before release checks so `apps/desktop/.output/public` contains the real assets.
 
-On Windows, `pnpm cap-setup` writes `LIBCLANG_PATH` and `CLANG_PATH` into `.cargo/config.toml` using the same resolved Visual Studio LLVM directory. Bindgen's loaded DLL and header-detecting compiler must match; do not pair Visual Studio's `libclang.dll` with standalone LLVM's `clang.exe` from `PATH`. If overriding these paths in PowerShell, set both:
+On Windows, `pnpm cap-setup` resolves `clang.exe` from `CLANG_PATH` when set, otherwise from `PATH`, and writes `CLANG_PATH` and the sibling `libclang.dll` as `LIBCLANG_PATH` into `.cargo/config.toml`. Use standalone LLVM 20 (pre-22) with the locked bindgen 0.70.1; LLVM 22's opaque-struct AST changes are incompatible with that version. Bindgen's loaded DLL and header-detecting compiler must come from the same installation; do not mix standalone LLVM with Visual Studio's newer LLVM. To select the standalone installation in PowerShell, ensure it is first on `PATH` and derive both paths from the resolved compiler:
 
 ```powershell
-$vsInstall = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -property installationPath
-$llvmBin = Join-Path ($vsInstall.Trim()) "VC/Tools/LLVM/x64/bin"
+$env:CLANG_PATH = (Get-Command clang).Source
+$llvmBin = Split-Path -Parent $env:CLANG_PATH
 $env:LIBCLANG_PATH = Join-Path $llvmBin "libclang.dll"
-$env:CLANG_PATH = Join-Path $llvmBin "clang.exe"
 ```
 
 Rust cache jobs also run for Rust-related pull requests and manual CI runs. Cache saving remains restricted to the main ref.
