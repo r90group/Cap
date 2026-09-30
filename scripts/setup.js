@@ -174,15 +174,11 @@ async function main() {
 			{ shell: "powershell.exe" },
 		);
 
-		const libclangPath = path.join(
-			vcInstallDir.trim(),
-			"VC/Tools/LLVM/x64/bin/libclang.dll",
-		);
+		const llvmBinPath = path
+			.join(vcInstallDir.trim(), "VC/Tools/LLVM/x64/bin")
+			.replaceAll("\\", "/");
 
-		cargoConfigContents += `LIBCLANG_PATH = "${libclangPath.replaceAll(
-			"\\",
-			"/",
-		)}"\n`;
+		cargoConfigContents += `LIBCLANG_PATH = "${llvmBinPath}/libclang.dll"\nCLANG_PATH = "${llvmBinPath}/clang.exe"\n`;
 	}
 
 	await fs.mkdir(path.join(__root, ".cargo"), { recursive: true });

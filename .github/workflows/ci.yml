@@ -18,6 +18,7 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
       rust: ${{ steps.filter.outputs.rust }}
       tauri-plugins: ${{ steps.filter.outputs.tauri-plugins }}
       branch: ${{ steps.branch.outputs.branch }}
@@ -37,6 +38,8 @@ jobs:
               - '.github/**'
               - 'crates/**'
               - 'apps/desktop/src-tauri/**'
+              - 'scripts/setup.js'
+              - 'scripts/build-cap-muxer.sh'
               - 'Cargo.toml'
               - 'Cargo.lock'
             tauri-plugins:
@@ -139,13 +142,15 @@ jobs:
       - name: Run setup
         shell: bash
         run: node scripts/setup.js
+        env:
+          RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
 
       - name: Build cap-muxer sidecar
         shell: bash
         run: ./scripts/build-cap-muxer.sh ${{ matrix.settings.target }}
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-features --locked --target ${{ matrix.settings.target }} -- -D warnings
 
   lint-biome:
     name: Lint (Biome)
@@ -248,18 +253,20 @@ jobs:
   rust-cache:
     name: Rust cache
     needs: changes
-    if: needs.changes.outputs.branch == 'main'
+    if: needs.changes.outputs.branch == 'main' || needs.changes.outputs.rust == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         settings:
           - target: x86_64-apple-darwin
-            runner: macos-latest
+            runner: macos-15-intel
           - target: aarch64-apple-darwin
             runner: macos-latest
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
     runs-on: ${{ matrix.settings.runner }}
+    env:
+      RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -268,25 +275,30 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.settings.target }}
+          components: clippy
 
       - uses: ./.github/actions/setup-rust-cache
         with:
           target: ${{ matrix.settings.target }}
-          save-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 24
+      - uses: ./.github/actions/setup-js
 
       - run: node scripts/setup.js
 
+      - name: Build cap-muxer sidecar
+        shell: bash
+        run: ./scripts/build-cap-muxer.sh ${{ matrix.settings.target }}
+
       - name: Build debug
-        run: cargo build --all
+        run: cargo build --all --target ${{ matrix.settings.target }}
+
+      - name: Build desktop frontend
+        run: pnpm turbo build --filter @cap/desktop
 
       - name: Build release
-        run: cargo check --all --release
+        run: cargo check --all --release --target ${{ matrix.settings.target }}
 
       - name: Run Clippy
         if: ${{ matrix.settings.target == 'aarch64-apple-darwin' || matrix.settings.target == 'x86_64-pc-windows-msvc' }}
-        run: cargo clippy --workspace --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-features --locked --target ${{ matrix.settings.target }} -- -D warnings
