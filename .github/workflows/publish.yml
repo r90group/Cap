@@ -1,343 +1,320 @@
-name: "publish"
+name: publish
 
-# change this when ready to release if you want CI/CD
 on:
-  workflow_dispatch:
-    inputs:
-      interactionId:
-        description: "Discord Interaction ID"
-        required: false
-        type: string
+  pull_request:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: fork-publication-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
-  CN_APPLICATION: cap/cap
-  APP_CARGO_TOML: apps/desktop/src-tauri/Cargo.toml
-  SENTRY_ORG: cap-s2
-  SENTRY_PROJECT: cap-desktop
+  RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  RELEASE_TAG: internal-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
 
 jobs:
-  draft:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.read_version.outputs.value }}
-      needs_release: ${{ steps.create_tag.outputs.tag_existed != 'true' }}
-      cn_release_stdout: ${{ steps.create_cn_release.outputs.stdout }}
-      gh_release_url: ${{ steps.create_gh_release.outputs.url }}
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Read version number
-        uses: SebRollen/toml-action@v1.0.2
-        id: read_version
-        with:
-          file: ${{ env.APP_CARGO_TOML }}
-          field: "package.version"
-
-      - name: Create tag
-        id: create_tag
-        if: ${{ steps.create_tag.outputs.tag_existed != 'true' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tag = "cap-v${{ steps.read_version.outputs.value }}";
-            const tagRef = `tags/${tag}`;
-
-            const TAG_EXISTED = "tag_existed";
-            const TAG_NAME = "tag_name";
-
-            core.setOutput(TAG_NAME, tag);
-
-            async function main() {
-              let tagExisted = true;
-
-              try {
-                await github.rest.git.getRef({
-                  ref: tagRef,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                });
-
-                tagExisted = true;
-                core.notice(`Release skipped as tag '${tag}' already exists. Update the version in '${{ env.APP_CARGO_TOML }}' before starting another release.`);
-              } catch (error) {
-                if ("status" in error && error.status === 404) tagExisted = false;
-                else throw error;
-              }
-
-             	core.setOutput(TAG_EXISTED, tagExisted);
-
-              if (!tagExisted)
-                await github.rest.git.createRef({
-                  ref: `refs/${tagRef}`,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  sha: context.sha,
-                });
-            }
-
-            main();
-
-      - name: Create draft CN release
-        id: create_cn_release
-        uses: crabnebula-dev/cloud-release@v0
-        with:
-          command: release draft ${{ env.CN_APPLICATION }} ${{ steps.read_version.outputs.value }} --framework tauri
-          api-key: ${{ secrets.CN_API_KEY }}
-
-      - name: Create draft GH release
-        id: create_gh_release
-        # TODO: Change to stable version when available
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ steps.read_version.outputs.value }}
-          tag_name: ${{ steps.create_tag.outputs.tag_name }}
-          draft: true
-          generate_release_notes: true
-
-      - name: Update Discord interaction
-        if: ${{ inputs.interactionId != '' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            async function main() {
-              const token = await core.getIDToken("cap-discord-bot");
-              const cnReleaseId = JSON.parse(`${{ steps.create_cn_release.outputs.stdout }}`).id;
-
-              const resp = await fetch("https://cap-discord-bot.brendonovich.workers.dev/github-workflow", {
-                method: "POST",
-                body: JSON.stringify({
-                  type: "release-ready",
-                  tag: "${{ steps.create_tag.outputs.tag_name }}",
-                  version: "${{ steps.read_version.outputs.value }}",
-                  releaseUrl: "${{ steps.create_gh_release.outputs.url }}",
-                  interactionId: "${{ inputs.interactionId }}",
-                  cnReleaseId
-                }),
-                headers: {
-                	"Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                }
-              });
-
-              if(resp.status !== 200) throw new Error(await resp.text());
-            }
-
-            main();
-
   build:
-    needs: draft
-    if: ${{ needs.draft.outputs.needs_release == 'true' }}
-    permissions:
-      contents: write
-      actions: read
-      id-token: write
+    if: >-
+      github.repository == 'r90group/Cap' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
+       (github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success'))
     strategy:
       fail-fast: false
       matrix:
-        settings:
-          - target: x86_64-apple-darwin
-            runner: macos-latest-xlarge
+        include:
           - target: aarch64-apple-darwin
-            runner: macos-latest-xlarge
+            runner: macos-14
           - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
-    runs-on: ${{ matrix.settings.runner }}
+            runner: windows-2022
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create API Key File
-        run: echo "${{ secrets.APPLE_API_KEY_FILE }}" > api.p8
-
-      - uses: apple-actions/import-codesign-certs@v2
-        if: ${{ matrix.settings.runner == 'macos-latest-xlarge' }}
+      - uses: actions/checkout@v4
         with:
-          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
-          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          ref: ${{ env.RELEASE_SHA }}
 
-      - name: Verify certificate
-        if: ${{ matrix.settings.runner == 'macos-latest-xlarge' }}
-        run: security find-identity -v -p codesigning ${{ runner.temp }}/build.keychain
-
-      - name: Rust setup
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.settings.target }}
+          targets: ${{ matrix.target }}
 
       - uses: ./.github/actions/setup-rust-cache
         with:
-          target: ${{ matrix.settings.target }}
+          target: ${{ matrix.target }}
 
       - uses: ./.github/actions/setup-js
 
-      - name: Create .env file in root
+      - name: Configure fork build
+        shell: bash
+        env:
+          SELF_HOST_URL: ${{ secrets.SELF_HOST_URL }}
+          RUST_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
-          echo "appVersion=${{ needs.draft.outputs.version }}" >> .env
-          echo "VITE_ENVIRONMENT=production" >> .env
-          echo "CAP_DESKTOP_SENTRY_URL=https://6a3b6a09e6ae976c2ad6fff710e88748@o4506859771527168.ingest.us.sentry.io/4508330917101568" >> .env
-          echo "NEXT_PUBLIC_WEB_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}" >> .env
-          echo 'NEXTAUTH_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}' >> .env
-          echo 'VITE_POSTHOG_KEY=${{ secrets.VITE_POSTHOG_KEY }}' >> .env
-          echo 'VITE_POSTHOG_HOST=${{ secrets.VITE_POSTHOG_HOST }}' >> .env
-          echo 'VITE_SERVER_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}' >> .env
-          echo 'RUST_TARGET_TRIPLE=${{ matrix.settings.target }}' >> .env
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const version = fs.readFileSync('apps/desktop/src-tauri/Cargo.toml', 'utf8').match(/^version = "([^"]+)"/m)[1];
+          const url = new URL(process.env.SELF_HOST_URL);
+          if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('SELF_HOST_URL must be a credential-free HTTPS origin');
+          fs.writeFileSync('.env', `appVersion=${version}\nVITE_ENVIRONMENT=production\nVITE_DISABLE_UPDATES=true\nVITE_SERVER_URL=${url.origin}\nNEXT_PUBLIC_WEB_URL=${url.origin}\nNEXTAUTH_URL=${url.origin}\nRUST_TARGET_TRIPLE=${process.env.RUST_TARGET_TRIPLE}\n`);
+          fs.writeFileSync(`release-${process.env.RUST_TARGET_TRIPLE}.json`, JSON.stringify({ revision: process.env.RELEASE_SHA, version, target: process.env.RUST_TARGET_TRIPLE }));
+          NODE
 
       - name: Run cap-setup
         shell: bash
         run: pnpm -w cap-setup
         env:
-          RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
+          RUST_TARGET_TRIPLE: ${{ matrix.target }}
 
       - name: Build cap-muxer sidecar
         shell: bash
-        run: ./scripts/build-cap-muxer.sh ${{ matrix.settings.target }}
+        run: ./scripts/build-cap-muxer.sh ${{ matrix.target }}
 
-      - name: Build app
+      - name: Build fork app
         working-directory: apps/desktop
-        run: pnpm build:tauri --target ${{ matrix.settings.target }} --config src-tauri/tauri.prod.conf.json
+        shell: bash
+        run: pnpm build:tauri --target ${{ matrix.target }} --config src-tauri/tauri.prod.conf.json
         env:
-          # https://github.com/tauri-apps/tauri-action/issues/740
           CI: false
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # codesigning
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # notarization
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ github.workspace }}/api.p8
-          APPLE_KEYCHAIN: ${{ runner.temp }}/build.keychain
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: '-'
 
-      - name: Upload unsigned Windows installer
-        if: ${{ runner.os == 'Windows' }}
-        id: upload_unsigned_windows_installer
-        uses: actions/upload-artifact@v4
+      - name: Collect fork assets
+        shell: bash
+        run: |
+          mkdir publish
+          cp release-${{ matrix.target }}.json publish/
+          if [ "$RUNNER_OS" = macOS ]; then
+            cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg publish/
+            cp target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz* publish/
+          else
+            cp target/${{ matrix.target }}/release/bundle/nsis/*.exe* publish/
+          fi
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: unsigned-windows-installer
-          path: target/${{ matrix.settings.target }}/release/bundle/nsis/*.exe
+          name: cap-${{ matrix.target }}
+          path: publish/
           if-no-files-found: error
 
-      - name: Submit SignPath signing request
-        if: ${{ runner.os == 'Windows' }}
-        id: submit_signpath_signing_request
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.upload_unsigned_windows_installer.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed-windows-installer
-
-      - name: Restore signed Windows installer
-        if: ${{ runner.os == 'Windows' }}
-        shell: pwsh
-        run: |
-          $signedDir = "signed-windows-installer"
-          $bundleDir = "target/${{ matrix.settings.target }}/release/bundle/nsis"
-
-          if (-not (Test-Path $signedDir)) {
-            throw "Signed artifact directory '$signedDir' not found."
-          }
-
-          $executables = Get-ChildItem -Path $signedDir -Filter *.exe -Recurse
-          if (-not $executables) {
-            throw "No signed executables found in '$signedDir'."
-          }
-
-          Write-Host "Copying signed executables to: $bundleDir"
-          Copy-Item -Path (Join-Path $signedDir '*.exe') -Destination $bundleDir -Force
-
-          Write-Host "Files in bundle directory after signing:"
-          Get-ChildItem -Path $bundleDir -Filter *.exe | ForEach-Object { Write-Host "  - $($_.Name)" }
-
-      - name: Re-sign Windows installer for Tauri updater
-        if: ${{ runner.os == 'Windows' }}
-        shell: bash
-        working-directory: apps/desktop
-        run: |
-          BUNDLE_DIR="../../target/${{ matrix.settings.target }}/release/bundle/nsis"
-          for exe in "$BUNDLE_DIR"/*.exe; do
-            echo "Re-signing $(basename "$exe") for Tauri updater..."
-            rm -f "${exe}.sig"
-            pnpm tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$exe"
-          done
-          echo "Signature files after re-signing:"
-          ls -la "$BUNDLE_DIR"/*.sig
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Upload assets
-        uses: crabnebula-dev/cloud-release@v0
-        with:
-          working-directory: apps/desktop
-          command: release upload ${{ env.CN_APPLICATION }} "${{ needs.draft.outputs.version }}" --framework tauri
-          api-key: ${{ secrets.CN_API_KEY }}
-        env:
-          TAURI_BUNDLE_PATH: ../..
-
-      - uses: matbour/setup-sentry-cli@8ef22a4ff03bcd1ebbcaa3a36a81482ca8e3872e
-
-      - name: Upload debug symbols to Sentry
-        if: ${{ runner.os == 'macOS' }}
-        shell: bash
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          sentry-cli debug-files upload -o ${{ env.SENTRY_ORG }} -p ${{ env.SENTRY_PROJECT }} target/Cap.dSYM
-
-      - name: Upload debug symbols to Sentry
-        if: ${{ runner.os == 'Windows' }}
-        shell: bash
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          sentry-cli debug-files upload -o ${{ env.SENTRY_ORG }} -p ${{ env.SENTRY_PROJECT }} target/${{ matrix.settings.target }}/release/cap_desktop.pdb
-
-  done:
-    needs: [draft, build]
+  release:
+    needs: build
+    if: github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
+    outputs:
+      release_id: ${{ steps.candidate.outputs.release_id }}
     steps:
-      - name: Send Discord notification
-        if: ${{ inputs.interactionId != '' }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cap-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install signature verifier
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Verify and inventory fork artifacts
+        shell: bash
+        run: bash scripts/verify-fork-artifacts.sh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Resolve exact-revision candidate
+        id: candidate
         uses: actions/github-script@v7
         with:
           script: |
-            async function main() {
-              const token = await core.getIDToken("cap-discord-bot");
-              const cnReleaseId = JSON.parse(`${{ needs.draft.outputs.cn_release_stdout }}`).id;
-
-              const resp = await fetch("https://cap-discord-bot.brendonovich.workers.dev/github-workflow", {
-                method: "POST",
-                body: JSON.stringify({
-                  type: "release-done",
-                  interactionId: "${{ inputs.interactionId }}",
-                  version: "${{ needs.draft.outputs.version }}",
-                  releaseUrl: "${{ needs.draft.outputs.gh_release_url }}",
-                  cnReleaseId
-                }),
-                headers: {
-                	"Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                }
-              });
-
-              if(resp.status !== 200) throw new Error(await resp.text());
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            let candidate;
+            for await (const page of github.paginate.iterator(github.rest.repos.listReleases, { owner, repo, per_page: 100 })) {
+              candidate = page.data.find(release => release.tag_name === tag);
+              if (candidate) break;
             }
+            if (!candidate) candidate = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, target_commitish: process.env.RELEASE_SHA, draft: true, prerelease: true, name: `Internal build ${process.env.RELEASE_SHA.slice(0, 12)}`, body: `R90 fork desktop build from ${process.env.RELEASE_SHA}. Candidate awaiting installed-artifact smoke.` })).data;
+            let tagged;
+            try { tagged = (await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` })).data.object.sha; }
+            catch (error) {
+              if (error.status !== 404) throw error;
+              tagged = (await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: process.env.RELEASE_SHA })).data.object.sha;
+            }
+            if (tagged !== process.env.RELEASE_SHA) throw new Error('Existing candidate tag revision mismatch');
+            core.setOutput('release_id', candidate.id);
+            core.setOutput('draft', candidate.draft);
 
-            main();
+      - name: Complete draft assets before publication
+        if: steps.candidate.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.candidate.outputs.release_id }}
+        run: |
+          gh release upload "$RELEASE_TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --method PATCH -F draft=false --jq .html_url
+
+  smoke:
+    needs: [build, release]
+    if: >-
+      always() && needs.build.result == 'success' &&
+      (github.event_name == 'pull_request' || needs.release.result == 'success')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            script: bash scripts/smoke-fork-macos.sh
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            script: pwsh -File scripts/smoke-fork-windows.ps1
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'pull_request'
+        with:
+          name: cap-${{ matrix.target }}
+          path: artifacts
+
+      - name: Inventory pre-publication artifacts
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum -- * > SHA256SUMS
+
+      - name: Download published candidate
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        run: |
+          mkdir artifacts
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id name; do
+            [[ "$name" =~ ^[A-Za-z0-9._+-]+$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/releases/assets/$id" -H 'Accept: application/octet-stream' > "artifacts/$name"
+          done
+
+      - name: Install and launch published app
+        shell: bash
+        run: ${{ matrix.script }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.target }}
+          path: smoke/
+          if-no-files-found: error
+
+  promote:
+    needs: [release, smoke]
+    if: github.event_name == 'workflow_run'
+    concurrency:
+      group: fork-healthy-channel
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = process.env.RELEASE_SHA;
+            const tag = process.env.RELEASE_TAG;
+            const candidate = (await github.rest.repos.getRelease({ owner, repo, release_id: Number(process.env.RELEASE_ID) })).data;
+            await github.rest.repos.updateRelease({ owner, repo, release_id: candidate.id, draft: false, body: `R90 fork desktop build from ${sha}. Installed-artifact smoke passed on macOS Apple Silicon and Windows x64: https://github.com/${owner}/${repo}/actions/runs/${context.runId}. macOS is ad-hoc signed, not notarized; Windows is not Authenticode signed. Updater signatures and signed SHA256SUMS are included.` });
+            const downloads = candidate.assets.filter(a => a.name.endsWith('.dmg') || a.name.endsWith('.exe')).map(a => `- [${a.name}](${a.browser_download_url})`).join('\n');
+            const body = `Healthy R90 fork desktop build from [${sha}](https://github.com/${owner}/${repo}/commit/${sha}).\n\n${downloads}\n\n[All artifacts, updater signatures and checksums](${candidate.html_url}).\n\nInstalled-artifact smoke passed on macOS Apple Silicon and Windows x64: https://github.com/${owner}/${repo}/actions/runs/${context.runId}\n\nmacOS is ad-hoc signed, not notarized; Windows is not Authenticode signed. Existing first-launch OS consent remains required. No automatic upstream update is published by this workflow.`;
+            let previousRelease;
+            let previousSha;
+            try {
+              previousRelease = (await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'internal-latest' })).data;
+              previousSha = (await github.rest.git.getRef({ owner, repo, ref: 'tags/internal-latest' })).data.object.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            if (previousSha && previousSha !== sha && !previousRelease?.assets.length) {
+              const comparison = (await github.rest.repos.compareCommits({ owner, repo, base: previousSha, head: sha })).data.status;
+              if (comparison === 'behind') {
+                core.notice('Published immutable candidate without superseding a newer healthy build');
+                return;
+              }
+              if (comparison !== 'ahead') throw new Error('Release channel history diverged');
+            }
+            const previousName = previousRelease?.name || 'Previous healthy internal build';
+            const previousBody = previousRelease?.body;
+            if (previousRelease?.assets.length) {
+              const archiveTag = `internal-${previousSha}`;
+              try { await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${archiveTag}`, sha: previousSha }); }
+              catch (error) {
+                if (error.status !== 422) throw error;
+                const archived = (await github.rest.git.getRef({ owner, repo, ref: `tags/${archiveTag}` })).data.object.sha;
+                if (archived !== previousSha) throw new Error('Existing archive tag revision mismatch');
+              }
+              await github.rest.repos.updateRelease({ owner, repo, release_id: previousRelease.id, tag_name: archiveTag });
+              previousRelease = undefined;
+            }
+            let channel;
+            try {
+              channel = previousRelease
+                ? (await github.rest.repos.updateRelease({ owner, repo, release_id: previousRelease.id, body, name: `Internal build ${sha.slice(0, 12)}` })).data
+                : (await github.rest.repos.createRelease({ owner, repo, tag_name: 'internal-latest', target_commitish: sha, name: `Internal build ${sha.slice(0, 12)}`, body, prerelease: true, make_latest: 'false' })).data;
+              await github.rest.git.updateRef({ owner, repo, ref: 'tags/internal-latest', sha, force: true });
+              const current = (await github.rest.git.getRef({ owner, repo, ref: 'tags/internal-latest' })).data.object.sha;
+              if (current !== sha) throw new Error('Release channel revision readback failed');
+            } catch (error) {
+              if (previousSha) {
+                await github.rest.git.updateRef({ owner, repo, ref: 'tags/internal-latest', sha: previousSha, force: true });
+                const restoredBody = previousBody || `Restored previous healthy build: https://github.com/${owner}/${repo}/releases/tag/internal-${previousSha}`;
+                if (channel) {
+                  await github.rest.repos.updateRelease({ owner, repo, release_id: channel.id, body: restoredBody, name: previousName });
+                } else if (!previousRelease) {
+                  await github.rest.repos.createRelease({ owner, repo, tag_name: 'internal-latest', target_commitish: previousSha, body: `Previous build and retained downloads: https://github.com/${owner}/${repo}/releases/tag/internal-${previousSha}`, name: previousName, prerelease: true, make_latest: 'false' });
+                }
+              } else if (channel) {
+                await github.rest.repos.deleteRelease({ owner, repo, release_id: channel.id });
+                await github.rest.git.deleteRef({ owner, repo, ref: 'tags/internal-latest' });
+              }
+              throw error;
+            }
+            core.summary.addHeading('Fork publication verified').addLink('Healthy release channel', channel.html_url).addRaw(`\nRevision: ${sha}\nCandidate: ${candidate.html_url}\nTargets: aarch64-apple-darwin, x86_64-pc-windows-msvc\nInstalled-artifact smoke: passed\n`);
+            await core.summary.write();
+
+  reject:
+    needs: [release, smoke]
+    if: always() && needs.release.result == 'success' && needs.smoke.result != 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Withdraw unhealthy candidate without moving healthy channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        run: gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --method PATCH -F draft=true --jq .html_url

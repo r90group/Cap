@@ -10,7 +10,7 @@
     <br />
     <br />
     <b>Internal Downloads: </b>
-		<a href="https://github.com/r90group/Cap/actions/workflows/self-build.yml">macOS & Windows builds</a>
+		<a href="https://github.com/r90group/Cap/releases/tag/internal-latest">macOS & Windows builds</a>
     <br />
   </p>
 </p>
@@ -30,30 +30,46 @@ For access to the Railway project, environment variables, deployment issues, or 
 
 ## Downloading the Desktop App
 
-We don't publish signed releases — instead, we build unsigned desktop installers on demand via GitHub Actions and download them as run artifacts.
+Every merge to `main` whose push CI passes publishes the R90 fork desktop app automatically. Download the current healthy build from **[Internal Downloads](https://github.com/r90group/Cap/releases/tag/internal-latest)**:
 
-1. Go to **[Actions → self-build](https://github.com/r90group/Cap/actions/workflows/self-build.yml)** in this repo.
-2. Pick the most recent successful run (or trigger a new one — see below).
-3. Scroll to the **Artifacts** section at the bottom of the run page and download the build for your platform:
-   - `cap-aarch64-apple-darwin` — Apple Silicon Macs (M1/M2/M3/M4)
-   - `cap-x86_64-apple-darwin` — Intel Macs
-   - `cap-x86_64-pc-windows-msvc` — Windows (64-bit)
-4. Unzip and install: `.dmg` on macOS, `.exe` (NSIS installer) on Windows.
+- macOS Apple Silicon (M1/M2/M3/M4): `*_aarch64.dmg`
+- Windows x64: `*_x64-setup.exe`
+
+The channel links to immutable, exact-revision release assets. Installer checksums, Tauri updater signatures, the updater public key, target/revision manifests, and the installed-app smoke run are linked from the release. Intel Mac builds are not supported by this fork's publication workflow.
 
 ### First-launch warnings (expected)
 
-Because these builds aren't code-signed or notarized:
+These internal builds retain the fork's existing signing boundary: macOS bundles are ad-hoc signed, not Apple Developer ID signed or notarized; Windows installers are not Authenticode signed. Tauri updater artifacts are signed with the existing fork key.
 
 - **macOS**: right-click the app → Open the first time, or run `xattr -dr com.apple.quarantine /Applications/Cap.app` after installing.
 - **Windows**: SmartScreen will warn you — click "More info" → "Run anyway".
 
 ## Building the Desktop App
 
-The `self-build` workflow (at [`.github/workflows/self-build.yml`](.github/workflows/self-build.yml)) builds the Tauri desktop app for macOS (arm64 + x86_64) and Windows (x86_64) in parallel. It's triggered manually:
+The [`publish` workflow](.github/workflows/publish.yml) follows successful **push** CI on `main`, checks out that exact revision, and builds macOS Apple Silicon and Windows x64 in parallel. No release dispatch, version bump, Discord interaction, or human approval is required.
 
-**GitHub UI** → Actions tab → **self-build** → Run workflow → (optionally set a version string) → Run.
+Pull requests build the same production configuration and install/launch the resulting artifacts without publishing. Publication verifies updater signatures before exposing a complete immutable candidate. Native smoke runners then download that published candidate, check its checksums and installed version, install it in a disposable directory, and launch the fresh-install `Welcome to Cap` window. Logs, screenshots and target/revision results are retained in the workflow artifacts; screenshots still need visual inspection for the first observed release. Only both successful native walks advance `internal-latest`; a failed or cancelled walk withdraws the candidate and leaves the last healthy channel unchanged. Agent triage can rerun failed jobs against the authenticated draft assets, or rerun all jobs to complete an interrupted draft upload; already published healthy assets are not overwritten. Promotion failures restore the prior channel. The previous rolling release's files are retained under its exact-revision tag during cutover.
 
-Build time is roughly 15–25 minutes on a cold Rust cache, faster afterwards thanks to `setup-rust-cache`.
+The workflow publishes to **r90group/Cap GitHub Releases**, never upstream CrabNebula, upstream Discord, upstream signing services or upstream Sentry. It does not activate the upstream automatic-update channel. Each green revision gets its own immutable candidate and smoke; newer healthy revisions may supersede an intermediate channel promotion. First-launch Gatekeeper/SmartScreen consent and screen/microphone grants are not bypassed or exercised by this isolated, unquarantined startup smoke. Private recordings, authenticated uploads and the Railway runtime are outside this artifact-publication walk.
+
+Kaylee's triage engineer can restore a later-discovered regression to a previously smoke-verified revision using:
+
+```bash
+REVISION=<previous-smoke-verified-full-sha>
+gh api repos/r90group/Cap/git/refs/tags/internal-latest --method PATCH -f sha="$REVISION" -F force=true
+gh release edit internal-latest --repo r90group/Cap --title "Internal build ${REVISION:0:12}" --notes "Restored healthy build and downloads: https://github.com/r90group/Cap/releases/tag/internal-$REVISION"
+gh api repos/r90group/Cap/git/ref/tags/internal-latest --jq .object.sha
+```
+
+Already installed copies are not silently replaced. Preserve the earlier immutable installers and signing identity.
+
+Railway's existing GitHub App integration deploys application changes to the self-hosted runtime independently. Desktop publication does not change its services, credentials, database, migrations, or watch-path policy.
+
+### Release failures and agent triage
+
+Failed default-branch CI/publication and Railway deployment statuses go through GitHub hook **689911713** to the approved signed R90 intake at `https://kaylee-alert-intake.misty-step.workers.dev/github/r90group`, never a human inbox. This fork has an explicit hook because the central automatic route guard excludes forks. Kaylee owns agent triage; inspect the failed run and retained smoke evidence before repair.
+
+Exercise the route without publishing or touching user data with `gh workflow run alert-route-probe.yml --repo r90group/Cap --ref main`. Its intentional failed run is labelled `alert-route-probe`; delivery is proven by the hook's HTTP 200 receipt and the agent intake record, not by the workflow file alone.
 
 ### Required repo secrets
 
@@ -62,7 +78,7 @@ The workflow depends on three repository secrets (**Settings → Secrets and var
 | Secret | Purpose |
 |---|---|
 | `SELF_HOST_URL` | Base URL of our Railway-hosted Cap instance (no trailing slash). Baked into builds as `VITE_SERVER_URL`. |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater signing key. Required by the bundler even though we don't use auto-update. Generate once with `pnpm tauri signer generate` from `apps/desktop`. |
+| `TAURI_SIGNING_PRIVATE_KEY` | Existing fork Tauri updater signing key. Publication verifies its signatures and signs the installer checksum inventory. Do not rotate it as part of a routine release. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the key above (can be empty). |
 
 If any of these need rotating or you're standing up a new fork, talk to @jacogrande.

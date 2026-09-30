@@ -1,0 +1,16 @@
+name: alert-route-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deliberate-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise agent triage without publishing artifacts
+        run: |
+          echo 'Deliberate alert-route-probe; no build, release or user data is changed.'
+          exit 1

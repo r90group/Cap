@@ -918,7 +918,8 @@ export default function () {
 
 let hasChecked = false;
 function createUpdateCheck() {
-	if (import.meta.env.DEV) return;
+	if (import.meta.env.DEV || import.meta.env.VITE_DISABLE_UPDATES === "true")
+		return;
 
 	const navigate = useNavigate();
 
