@@ -169,6 +169,8 @@ jobs:
 
   build-desktop:
     name: Build Desktop
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
