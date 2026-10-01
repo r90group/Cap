@@ -1,5 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { forkReleaseVersion } from "./release-version.js";
+import { forkReleaseVersion, forkSourceVersion } from "./release-version.js";
 
 function compareStableVersions(left, right) {
 	const a = left.split(".").map(Number);
@@ -11,6 +15,46 @@ function compareStableVersions(left, right) {
 }
 
 describe("fork publication versions", () => {
+	it("keeps descendant updates newer when ancestors finish later and HEAD moves", () => {
+		const repository = mkdtempSync(join(tmpdir(), "cap-release-history-"));
+		const git = (...args) =>
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"user.name=Cap CI",
+					"-c",
+					"user.email=cap-ci@example.invalid",
+					"-c",
+					"commit.gpgsign=false",
+					"-c",
+					`core.hooksPath=${join(repository, "empty-hooks")}`,
+					...args,
+				],
+				{ cwd: repository, encoding: "utf8" },
+			).trim();
+		try {
+			git("init", "--quiet", "--initial-branch=main");
+			git("commit", "--quiet", "--allow-empty", "--message=ancestor");
+			const ancestor = git("rev-parse", "HEAD");
+			git("commit", "--quiet", "--allow-empty", "--message=descendant");
+			const descendant = git("rev-parse", "HEAD");
+			const newer = forkSourceVersion("0.4.85", descendant, repository);
+			const older = forkSourceVersion("0.4.85", ancestor, repository);
+			expect(compareStableVersions(newer, older)).toBeGreaterThan(0);
+			git("commit", "--quiet", "--allow-empty", "--message=later-head");
+			expect(forkSourceVersion("0.4.85", descendant, repository)).toBe(newer);
+			expect(
+				compareStableVersions(
+					forkSourceVersion("0.4.85", "HEAD", repository),
+					newer,
+				),
+			).toBeGreaterThan(0);
+		} finally {
+			rmSync(repository, { recursive: true, force: true });
+		}
+	});
+
 	it("makes successive merges eligible for native semver updates", () => {
 		let installed = "0.4.85";
 		for (let sequence = 1; sequence <= 300; sequence++) {

@@ -24,7 +24,6 @@ if (!key) throw new Error('Fork updater signing key is missing');
 process.stdout.write(key.startsWith('untrusted comment:') ? key : Buffer.from(key.trim(), 'base64'));
 NODE
 }
-printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | minisign -R -s <(fork_signing_key) -p artifacts/updater.pub
 for signature in "$signature_dir"/*.minisig; do
   name=$(basename "$signature" .minisig)
   minisign -V -m "artifacts/$name" -x "$signature" -p artifacts/updater.pub

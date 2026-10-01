@@ -21,6 +21,15 @@ expected=$(node -p "JSON.parse(require('fs').readFileSync('$manifest')).version"
 test "$version" = "$expected"
 binary_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
 file "$app/Contents/MacOS/$binary_name" | tee smoke/binary.txt
+test "$(lipo -archs "$app/Contents/MacOS/$binary_name")" = arm64
+updater_dir="$RUNNER_TEMP/cap-updater"
+mkdir -p "$updater_dir"
+tar -xzf artifacts/*.app.tar.gz -C "$updater_dir"
+updater_app="$updater_dir/Cap.app"
+codesign --verify --deep --strict "$updater_app"
+updater_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$updater_app/Contents/Info.plist")
+test "$updater_version" = "$expected"
+cmp "$app/Contents/MacOS/$binary_name" "$updater_app/Contents/MacOS/$binary_name"
 "$app/Contents/MacOS/$binary_name" > smoke/startup.log 2>&1 &
 app_pid=$!
 trap 'kill "$app_pid" 2>/dev/null || true' EXIT
@@ -48,4 +57,4 @@ exit(1)
 SWIFT
 screencapture -x smoke/onboarding.png
 kill -0 "$app_pid"
-node --input-type=module -e 'import fs from "node:fs"; const m=JSON.parse(fs.readFileSync(process.argv[1])); fs.writeFileSync("smoke/result.json", JSON.stringify({...m, installed: true, codesign: "ad-hoc verified", window: "Welcome to Cap", result: "pass"}));' "$manifest"
+node --input-type=module -e 'import fs from "node:fs"; const m=JSON.parse(fs.readFileSync(process.argv[1])); fs.writeFileSync("smoke/result.json", JSON.stringify({...m, installed: true, codesign: "ad-hoc verified", architecture: "arm64", updater_archive: "matching installed binary and version", window: "Welcome to Cap", result: "pass"}));' "$manifest"

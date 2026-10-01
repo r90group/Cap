@@ -12,7 +12,7 @@
 			"endpoints": [
 				"https://github.com/r90group/Cap/releases/download/internal-latest/latest.json"
 			],
-			"pubkey": ""
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkgOUY1RTFCQTJGMjAxODE5RgpSV1NmZ1FIeW9odGVuMXE3cDBoTzhJaVVWTnJkaEFVTXJqckU0NTA0MC9DV3RFV05RenZqYmhHWgo="
 		}
 	},
 	"bundle": {
