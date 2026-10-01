@@ -44,10 +44,10 @@ pub fn handle(app_handle: &AppHandle, urls: Vec<Url>) {
             DeepLinkAction::try_from(&url)
                 .map_err(|e| match e {
                     ActionParseFromUrlError::ParseFailed(msg) => {
-                        eprintln!("Failed to parse deep link \"{}\": {}", &url, msg)
+                        eprintln!("Failed to parse deep link \"{}\": {}", url, msg)
                     }
                     ActionParseFromUrlError::Invalid => {
-                        eprintln!("Invalid deep link format \"{}\"", &url)
+                        eprintln!("Invalid deep link format \"{}\"", url)
                     }
                     // Likely login action, not handled here.
                     ActionParseFromUrlError::NotAction => {}
