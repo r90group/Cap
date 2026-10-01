@@ -12,7 +12,7 @@ esac
 
 export RUST_TARGET_TRIPLE="$target"
 export CARGO_PROFILE_RELEASE_DEBUG=0
+env -u TAURI_SIGNING_PRIVATE_KEY -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD pnpm -w cap-setup
+env -u TAURI_SIGNING_PRIVATE_KEY -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD bash scripts/build-cap-muxer.sh "$target"
 export CI=false
-pnpm -w cap-setup
-bash scripts/build-cap-muxer.sh "$target"
 pnpm --dir apps/desktop build:tauri "${args[@]}"

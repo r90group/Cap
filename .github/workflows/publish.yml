@@ -37,7 +37,7 @@ jobs:
       - uses: ./.github/actions/setup-js
 
       - name: Check native release version boundaries
-        run: pnpm --dir apps/desktop exec vitest run scripts/release-version.test.js
+        run: pnpm --dir apps/desktop exec vitest run scripts/release-version.test.js scripts/run-with-deadline.test.js
 
       - name: Install updater key tooling
         run: sudo apt-get update && sudo apt-get install -y minisign
@@ -123,7 +123,7 @@ jobs:
 
       - name: Build fork app
         shell: bash
-        run: bash scripts/build-fork.sh ${{ matrix.target }} signed
+        run: node apps/desktop/scripts/run-with-deadline.js 4800000 bash scripts/build-fork.sh ${{ matrix.target }} signed
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

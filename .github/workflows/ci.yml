@@ -200,9 +200,12 @@ jobs:
         shell: bash
         run: printf 'VITE_ENVIRONMENT=production\n' > .env
 
+      - name: Check real command failure and deadline boundaries
+        run: pnpm --dir apps/desktop exec vitest run scripts/run-with-deadline.test.js
+
       - name: Preflight production publisher without signing or publication
         shell: bash
-        run: bash scripts/build-fork.sh ${{ matrix.settings.target }} preflight
+        run: node apps/desktop/scripts/run-with-deadline.js 4800000 bash scripts/build-fork.sh ${{ matrix.settings.target }} preflight
 
   tauri-plugins:
     name: Verify Tauri plugin versions
