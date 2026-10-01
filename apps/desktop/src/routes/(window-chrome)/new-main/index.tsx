@@ -935,7 +935,7 @@ function createUpdateCheck() {
 		} catch (e) {
 			console.error("Failed to check for updates:", e);
 			await dialog.message(
-				"Unable to check for updates. Please download the latest version manually from cap.so/download. Your data will not be lost.\n\nIf this issue persists, please contact support.",
+				"Unable to check for updates. Please download the current R90 fork installer from https://github.com/r90group/Cap/releases/tag/internal-latest. Your data will not be lost.\n\nIf this issue persists, please contact agent triage.",
 				{ title: "Update Error", kind: "error" },
 			);
 			return;

@@ -15,6 +15,13 @@
 - Docker: `pnpm docker:up | docker:stop | docker:clean`.
 - Quality: `pnpm lint`, `pnpm format`, `pnpm typecheck`. Rust: `cargo build -p <crate>`, `cargo test -p <crate>`.
 
+## Fork Release
+- Normal review and CI precede merge. Successful push CI on `main` starts `.github/workflows/publish.yml` for that exact revision; there is no per-release human gate.
+- The owning procedure is [Our Deployment](README.md#our-deployment). Targets are the R90 fork's macOS Apple Silicon and Windows x64 desktop installers; the existing Railway runtime integration remains separate.
+- Production signing credentials are consumed only after successful same-repository default-branch push CI, never automatically by PR-source execution. Publication generates an increasing native Tauri/installer version, verifies signatures, then runs `scripts/smoke-fork-macos.sh` and `scripts/smoke-fork-windows.ps1` against downloaded, published installers. Only healthy targets enter the fork-owned static `latest.json` updater channel; failed promotion restores its prior manifest/revision.
+- Preserve existing signing credentials, first-launch OS consent, private recordings and database boundaries. Do not publish to upstream Cap services or remotely migrate legacy clients embedding upstream updater trust; those clients install the current fork installer once.
+- Failures route to the approved agent intake through hook 689911713. `alert-route-probe.yml` deliberately exercises failure delivery without releasing artifacts.
+
 ## Coding Style & Naming
 - TypeScript: 2‑space indent; Biome formats/lints (`pnpm format`).
 - Rust: `rustfmt` + workspace clippy lints.

@@ -10,7 +10,7 @@
     <br />
     <br />
     <b>Internal Downloads: </b>
-		<a href="https://github.com/r90group/Cap/actions/workflows/self-build.yml">macOS & Windows builds</a>
+		<a href="https://github.com/r90group/Cap/releases/tag/internal-latest">macOS & Windows builds</a>
     <br />
   </p>
 </p>
@@ -30,30 +30,57 @@ For access to the Railway project, environment variables, deployment issues, or 
 
 ## Downloading the Desktop App
 
-We don't publish signed releases — instead, we build unsigned desktop installers on demand via GitHub Actions and download them as run artifacts.
+Every merge to `main` whose push CI passes publishes the R90 fork desktop app automatically. Download the current healthy build from **[Internal Downloads](https://github.com/r90group/Cap/releases/tag/internal-latest)**:
 
-1. Go to **[Actions → self-build](https://github.com/r90group/Cap/actions/workflows/self-build.yml)** in this repo.
-2. Pick the most recent successful run (or trigger a new one — see below).
-3. Scroll to the **Artifacts** section at the bottom of the run page and download the build for your platform:
-   - `cap-aarch64-apple-darwin` — Apple Silicon Macs (M1/M2/M3/M4)
-   - `cap-x86_64-apple-darwin` — Intel Macs
-   - `cap-x86_64-pc-windows-msvc` — Windows (64-bit)
-4. Unzip and install: `.dmg` on macOS, `.exe` (NSIS installer) on Windows.
+- macOS Apple Silicon (M1/M2/M3/M4): `*_aarch64.dmg`
+- Windows x64: `*_x64-setup.exe`
+
+The channel links to immutable, exact-revision release assets. Installer checksums, Tauri updater signatures, the existing fork public key, target/revision manifests, and the installed-app smoke run are linked from the release. Intel Mac builds are not supported by this fork's publication workflow.
 
 ### First-launch warnings (expected)
 
-Because these builds aren't code-signed or notarized:
+These internal builds retain the fork's existing signing boundary: macOS bundles are ad-hoc signed, not Apple Developer ID signed or notarized; Windows installers are not Authenticode signed. Tauri updater artifacts are signed with the existing fork key. [INFERENCE] macOS may re-prompt for screen/microphone grants after an ad-hoc-signed update changes the code identity; this workflow does not grant or bypass them.
 
 - **macOS**: right-click the app → Open the first time, or run `xattr -dr com.apple.quarantine /Applications/Cap.app` after installing.
 - **Windows**: SmartScreen will warn you — click "More info" → "Run anyway".
 
 ## Building the Desktop App
 
-The `self-build` workflow (at [`.github/workflows/self-build.yml`](.github/workflows/self-build.yml)) builds the Tauri desktop app for macOS (arm64 + x86_64) and Windows (x86_64) in parallel. It's triggered manually:
+The [`publish` workflow](.github/workflows/publish.yml) follows successful **push** CI on `main`, checks out that exact revision, and builds macOS Apple Silicon and Windows x64 in parallel. No release dispatch, version bump, Discord interaction, or human approval is required.
 
-**GitHub UI** → Actions tab → **self-build** → Run workflow → (optionally set a version string) → Run.
+Pull requests use normal native CI and independent review, not production signing or publication. Production signing credentials are consumed only after successful same-repository push CI on `main`. Publication verifies updater signatures before exposing a complete immutable candidate. Native smoke runners then download that published candidate, check its checksums and installed version, install it in a disposable directory, and launch the fresh-install `Welcome to Cap` window. macOS additionally verifies the updater archive's ad-hoc signature, arm64 architecture, version and exact executable match to the installed DMG app. Logs, screenshots and target/revision results are retained in attempt-specific workflow artifacts; screenshots still need visual inspection for the first observed release. Only both successful native walks advance `internal-latest` and its static Tauri `latest.json` manifest. A failed or cancelled walk withdraws a never-healthy candidate and leaves the last healthy channel unchanged; previously verified immutable releases remain available for rollback if a later re-walk fails, and that failed walk still raises triage. Agent triage recovers a failed publication by re-running **all jobs** for the same revision, not by approving a release or rerunning only smoke against a withdrawn draft.
 
-Build time is roughly 15–25 minutes on a cold Rust cache, faster afterwards thanks to `setup-rust-cache`.
+The workflow publishes to **r90group/Cap GitHub Releases**, never upstream CrabNebula, upstream Discord, upstream signing services or upstream Sentry. First-parent source-ancestry counts generate strictly increasing stable native versions within Windows Installer bounds, including patch/minor rollover, independent of CI completion order and stable on reruns. The version is applied to the actual Tauri package and installer, not merely its filename. The existing fork public key is pinned in production config and checked against the signing credential without persisting private bytes. The fork-owned updater endpoint is `https://github.com/r90group/Cap/releases/download/internal-latest/latest.json`. Its exact source revision and version bind both smoke-healthy immutable updater artifacts. Promotion rejects a non-increasing version and reads back the real endpoint with a short, bounded propagation wait; a failed promotion restores the prior manifest and channel. Every green revision gets its own immutable candidate and smoke. A candidate is not healthy merely because its prerelease is visible: only a successful native walk publishes its `latest.json`. Promotions queue without superseding pending revisions, and newer healthy revisions may supersede an intermediate channel promotion.
+
+Before promotion, published assets are downloaded again and their checksum inventory is authenticated with the pinned fork key, then every published payload hash is checked. A failed published-byte check cannot advance the healthy channel. Preserve `main`'s first-parent history: rewriting or shortening it can regress the source-derived native version and is rejected by the monotonic promotion guard.
+
+Re-running the same revision only recovers transient failures: GitHub retains that run's workflow definition, and the scripts/config stay bound to its source SHA. Repair broken publication tooling through a new normally reviewed and CI-verified merge; do not substitute a different source or hand-publish a version to rescue the old run.
+
+Legacy installers that embed upstream Cap's endpoint/public key must install the current fork installer once. This publication neither migrates their cryptographic trust remotely nor rotates or bypasses signing keys. First-launch Gatekeeper/SmartScreen consent and screen/microphone grants are not bypassed or exercised by this isolated, unquarantined startup smoke. Private recordings, authenticated uploads and the Railway runtime are outside this artifact-publication walk.
+
+Kaylee's triage engineer can restore a later-discovered regression to a previously smoke-verified revision using:
+
+```bash
+REVISION=<previous-smoke-verified-full-sha>
+RESTORE_DIR=$(mktemp -d)
+gh release download "internal-$REVISION" --repo r90group/Cap --pattern latest.json --dir "$RESTORE_DIR"
+gh release upload internal-latest "$RESTORE_DIR/latest.json" --repo r90group/Cap --clobber
+gh api repos/r90group/Cap/git/refs/tags/internal-latest --method PATCH -f sha="$REVISION" -F force=true
+gh release edit internal-latest --repo r90group/Cap --title "Internal build ${REVISION:0:12}" --notes "Restored healthy build and downloads: https://github.com/r90group/Cap/releases/tag/internal-$REVISION"
+gh api repos/r90group/Cap/git/ref/tags/internal-latest --jq .object.sha
+gh release download internal-latest --repo r90group/Cap --pattern latest.json --output -
+rm -r "$RESTORE_DIR"
+```
+
+Restore only a prior smoke-verified fork manifest and its matching revision; pre-updater legacy archives have no such manifest. Already installed copies are not silently downgraded by a rollback. The next fixed publication has a newer generated version and is eligible for normal client updates. Preserve the earlier immutable installers and signing identity.
+
+Railway's existing GitHub App integration deploys application changes to the self-hosted runtime independently. Desktop publication does not change its services, credentials, database, migrations, or watch-path policy.
+
+### Release failures and agent triage
+
+Failed default-branch CI/publication and Railway deployment statuses go through GitHub hook **689911713** to the approved signed R90 intake at `https://kaylee-alert-intake.misty-step.workers.dev/github/r90group`, never a human inbox. This fork has an explicit hook because the central automatic route guard excludes forks. Kaylee owns agent triage; inspect the failed run and retained smoke evidence before repair.
+
+Exercise the route without publishing or touching user data with `gh workflow run alert-route-probe.yml --repo r90group/Cap --ref main`. Its intentional failed run is labelled `alert-route-probe`; delivery is proven by the hook's HTTP 200 receipt and the agent intake record, not by the workflow file alone.
 
 ### Required repo secrets
 
@@ -62,7 +89,7 @@ The workflow depends on three repository secrets (**Settings → Secrets and var
 | Secret | Purpose |
 |---|---|
 | `SELF_HOST_URL` | Base URL of our Railway-hosted Cap instance (no trailing slash). Baked into builds as `VITE_SERVER_URL`. |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater signing key. Required by the bundler even though we don't use auto-update. Generate once with `pnpm tauri signer generate` from `apps/desktop`. |
+| `TAURI_SIGNING_PRIVATE_KEY` | Existing fork Tauri updater signing key. Publication verifies its signatures and signs the installer checksum inventory. Do not rotate it as part of a routine release. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the key above (can be empty). |
 
 If any of these need rotating or you're standing up a new fork, talk to @jacogrande.
