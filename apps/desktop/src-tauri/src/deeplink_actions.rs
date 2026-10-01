@@ -125,12 +125,12 @@ impl DeepLinkAction {
                         .into_iter()
                         .find(|(s, _)| s.name == name)
                         .map(|(s, _)| ScreenCaptureTarget::Display { id: s.id })
-                        .ok_or(format!("No screen with name \"{}\"", &name))?,
+                        .ok_or(format!("No screen with name \"{}\"", name))?,
                     CaptureMode::Window(name) => cap_recording::screen_capture::list_windows()
                         .into_iter()
                         .find(|(w, _)| w.name == name)
                         .map(|(w, _)| ScreenCaptureTarget::Window { id: w.id })
-                        .ok_or(format!("No window with name \"{}\"", &name))?,
+                        .ok_or(format!("No window with name \"{}\"", name))?,
                 };
 
                 let inputs = StartRecordingInputs {

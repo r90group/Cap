@@ -79,6 +79,8 @@ $llvmBin = Split-Path -Parent $env:CLANG_PATH
 $env:LIBCLANG_PATH = Join-Path $llvmBin "libclang.dll"
 ```
 
+The locked Cargo build helpers support Visual Studio 18/2026: [`cmake` 0.1.55](https://github.com/rust-lang/cmake-rs/releases/tag/v0.1.55) recognizes its CMake generator and requires `cc` 1.2.46, which requires `find-msvc-tools` 0.1.5 or newer. The lockfile uses those versions, with the minimum compatible `find-msvc-tools` version. This fixes `whisper-rs-sys` failing with `couldn't determine visual studio generator` without forcing a generator or downgrading the runner.
+
 Rust cache jobs also run for Rust-related pull requests and manual CI runs. Cache saving remains restricted to the main ref.
 
 #### Where are my recordings stored?
