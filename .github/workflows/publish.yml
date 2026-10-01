@@ -1,32 +1,29 @@
 name: publish
 
 on:
-  pull_request:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
 
 concurrency:
-  group: fork-publication-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event.workflow_run.head_sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: fork-publication-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
-  RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-  RELEASE_TAG: internal-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+  RELEASE_TAG: internal-${{ github.event.workflow_run.head_sha }}
 
 jobs:
   prepare:
     if: >-
       github.repository == 'r90group/Cap' &&
-      ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository) ||
-       (github.event.workflow_run.head_repository.full_name == github.repository &&
-        github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.conclusion == 'success'))
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.metadata.outputs.version }}
@@ -140,7 +137,6 @@ jobs:
         run: pnpm build:tauri --target ${{ matrix.target }} --config src-tauri/tauri.prod.conf.json
         env:
           CI: false
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: '-'
@@ -166,7 +162,6 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -231,10 +226,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --method PATCH -F draft=false --jq .html_url
 
   smoke:
-    needs: [build, release]
-    if: >-
-      always() && needs.build.result == 'success' &&
-      (github.event_name == 'pull_request' || needs.release.result == 'success')
+    needs: release
     strategy:
       fail-fast: false
       matrix:
@@ -252,25 +244,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_SHA }}
 
-      - uses: actions/download-artifact@v4
-        if: github.event_name == 'pull_request'
-        with:
-          name: cap-${{ matrix.target }}
-          path: artifacts
-
-      - name: Inventory pre-publication artifacts
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          cd artifacts
-          if [ "$RUNNER_OS" = macOS ]; then
-            shasum -a 256 -- * > SHA256SUMS
-          else
-            sha256sum -- * > SHA256SUMS
-          fi
-
       - name: Download published candidate
-        if: github.event_name == 'workflow_run'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -296,7 +270,6 @@ jobs:
 
   promote:
     needs: [release, smoke]
-    if: github.event_name == 'workflow_run'
     concurrency:
       group: fork-healthy-channel
       cancel-in-progress: false
