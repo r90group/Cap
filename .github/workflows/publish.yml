@@ -337,6 +337,14 @@ jobs:
             const { execFileSync } = require('node:child_process');
             const sha = process.env.RELEASE_SHA;
             const candidate = (await github.rest.repos.getRelease({ owner, repo, release_id: Number(process.env.RELEASE_ID) })).data;
+            const inventory = new Set(require('node:fs').readFileSync('published/SHA256SUMS', 'utf8').trimEnd().split('\n').map(line => {
+              const match = line.match(/^[0-9a-f]{64} [ *](.+)$/);
+              if (!match) throw new Error('Signed checksum inventory line is invalid');
+              return match[1];
+            }));
+            for (const asset of candidate.assets) {
+              if (!['latest.json', 'SHA256SUMS', 'SHA256SUMS.minisig'].includes(asset.name) && !inventory.has(asset.name)) throw new Error('Published release includes an asset outside the signed inventory');
+            }
             const assetText = async asset => {
               if (!asset) throw new Error('Required release metadata or signature is missing');
               return execFileSync('gh', ['api', `repos/${owner}/${repo}/releases/assets/${asset.id}`, '-H', 'Accept: application/octet-stream'], { encoding: 'utf8' });
@@ -362,8 +370,9 @@ jobs:
             compareVersions(version, version);
             const platforms = {};
             for (const [target, suffix] of [['darwin-aarch64', '.app.tar.gz'], ['windows-x86_64', '_x64-setup.exe']]) {
-              const artifact = candidate.assets.find(a => a.name.endsWith(suffix));
-              if (!artifact) throw new Error(`Published updater artifact for ${target} is missing`);
+              const artifacts = candidate.assets.filter(a => inventory.has(a.name) && a.name.endsWith(suffix));
+              if (artifacts.length !== 1) throw new Error(`Published signed updater artifact for ${target} is not unique`);
+              const artifact = artifacts[0];
               const signature = (await assetText(candidate.assets.find(a => a.name === `${artifact.name}.sig`))).trim();
               if (!signature) throw new Error(`Published updater signature for ${target} is empty`);
               platforms[target] = { url: artifact.browser_download_url, signature };
