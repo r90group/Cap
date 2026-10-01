@@ -305,6 +305,26 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Verify published bytes against the pinned fork signing root
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          mkdir published
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id name; do
+            [[ "$name" =~ ^[A-Za-z0-9._+-]+$ ]] || exit 1
+            gh api "repos/$GITHUB_REPOSITORY/releases/assets/$id" -H 'Accept: application/octet-stream' > "published/$name"
+          done
+          node -e 'const fs = require("node:fs"); const config = JSON.parse(fs.readFileSync("apps/desktop/src-tauri/tauri.prod.conf.json")); fs.writeFileSync(process.env.RUNNER_TEMP + "/fork-updater.pub", Buffer.from(config.plugins.updater.pubkey, "base64"));'
+          minisign -Vm published/SHA256SUMS -p "$RUNNER_TEMP/fork-updater.pub" -x published/SHA256SUMS.minisig
+          (cd published && sha256sum -c SHA256SUMS)
+
       - uses: actions/github-script@v7
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -451,8 +471,10 @@ jobs:
             await core.summary.write();
 
   reject:
-    needs: [release, smoke]
-    if: always() && needs.release.result == 'success' && needs.smoke.result != 'success'
+    needs: [release, smoke, promote]
+    if: >-
+      always() && needs.release.result == 'success' &&
+      (needs.smoke.result != 'success' || needs.promote.result != 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write

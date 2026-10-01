@@ -15,8 +15,9 @@ $install = Start-Process $installer.FullName -ArgumentList '/S', "/D=$installDir
 if ($install.ExitCode -ne 0) { throw "Installer failed with exit $($install.ExitCode)" }
 $config = Get-Content apps/desktop/src-tauri/tauri.prod.conf.json | ConvertFrom-Json
 $binary = Join-Path $installDir "$($config.mainBinaryName).exe"
-$version = (Get-Item $binary).VersionInfo.ProductVersion
-if ($version -ne $manifest.version) { throw "Installed version $version differs from $($manifest.version)" }
+$versionInfo = (Get-Item $binary).VersionInfo
+$version = "$($versionInfo.ProductMajorPart).$($versionInfo.ProductMinorPart).$($versionInfo.ProductBuildPart)"
+if ($version -ne $manifest.version -or $versionInfo.ProductPrivatePart -ne 0) { throw "Installed version $version.$($versionInfo.ProductPrivatePart) differs from $($manifest.version)" }
 $process = Start-Process $binary -PassThru -RedirectStandardOutput smoke/startup.log -RedirectStandardError smoke/stderr.log
 try {
     $ready = $false
