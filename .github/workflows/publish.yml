@@ -121,22 +121,10 @@ jobs:
           fs.writeFileSync(`release-${process.env.RUST_TARGET_TRIPLE}.json`, JSON.stringify({ revision: process.env.RELEASE_SHA, version, target: process.env.RUST_TARGET_TRIPLE }));
           NODE
 
-      - name: Run cap-setup
-        shell: bash
-        run: pnpm -w cap-setup
-        env:
-          RUST_TARGET_TRIPLE: ${{ matrix.target }}
-
-      - name: Build cap-muxer sidecar
-        shell: bash
-        run: ./scripts/build-cap-muxer.sh ${{ matrix.target }}
-
       - name: Build fork app
-        working-directory: apps/desktop
         shell: bash
-        run: pnpm build:tauri --target ${{ matrix.target }} --config src-tauri/tauri.prod.conf.json
+        run: bash scripts/build-fork.sh ${{ matrix.target }} signed
         env:
-          CI: false
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: '-'
