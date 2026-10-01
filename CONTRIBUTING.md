@@ -35,7 +35,7 @@ Before anything else, make sure you have the following installed:
 
 Run `pnpm install`, then run `pnpm cap-setup` to install native dependencies such as FFmpeg.
 
-On Windows, llvm, clang, and VCPKG must be installed.
+On Windows, Visual Studio's C++ tools, standalone LLVM 20 on `PATH`, and VCPKG must be installed.
 On MacOS, cmake must be installed.
 `pnpm cap-setup` does not yet install these dependencies for you.
 
@@ -52,6 +52,36 @@ When running `@cap/desktop` from a terminal on macOS,
 you will need to grant permissions (screen recording, microphone, etc.) to the terminal, not the Cap app.
 For example, if you run `pnpm dev:desktop` in the macOS `Terminal.app`,
 you will need to grant permissions to it instead of `Cap - Development.app`.
+
+#### Native Rust workspace builds
+
+Run workspace builds on a host matching the target: `aarch64-apple-darwin` on Apple Silicon, `x86_64-apple-darwin` on Intel macOS, or `x86_64-pc-windows-msvc` on x64 Windows. CI uses `macos-15-intel` for the Intel target instead of cross-compiling on Apple Silicon.
+
+After installing pnpm dependencies, run the following from the repository root in Bash (Git Bash on Windows), changing `RUST_TARGET_TRIPLE` to the native target:
+
+```bash
+export RUST_TARGET_TRIPLE=aarch64-apple-darwin
+pnpm cap-setup
+bash scripts/build-cap-muxer.sh "$RUST_TARGET_TRIPLE"
+cargo build --all --target "$RUST_TARGET_TRIPLE"
+pnpm turbo build --filter @cap/desktop
+cargo check --all --release --target "$RUST_TARGET_TRIPLE"
+cargo clippy --workspace --all-features --locked --target "$RUST_TARGET_TRIPLE" -- -D warnings
+```
+
+The setup target selects the matching native FFmpeg dependencies. The sidecar script builds and copies the real target-suffixed `cap-muxer` binary required by Tauri. Direct Cargo commands do not run Tauri's `beforeBuildCommand`; build the desktop frontend before release checks so `apps/desktop/.output/public` contains the real assets.
+
+On Windows, `pnpm cap-setup` resolves `clang.exe` from `CLANG_PATH` when set, otherwise from `PATH`, and writes `CLANG_PATH` and the sibling `libclang.dll` as `LIBCLANG_PATH` into `.cargo/config.toml`. Use standalone LLVM 20 (pre-22) with the locked bindgen 0.70.1; LLVM 22's opaque-struct AST changes are incompatible with that version. Bindgen's loaded DLL and header-detecting compiler must come from the same installation; do not mix standalone LLVM with Visual Studio's newer LLVM. To select the standalone installation in PowerShell, ensure it is first on `PATH` and derive both paths from the resolved compiler:
+
+```powershell
+$env:CLANG_PATH = (Get-Command clang).Source
+$llvmBin = Split-Path -Parent $env:CLANG_PATH
+$env:LIBCLANG_PATH = Join-Path $llvmBin "libclang.dll"
+```
+
+The locked Cargo build helpers support Visual Studio 18/2026: [`cmake` 0.1.55](https://github.com/rust-lang/cmake-rs/releases/tag/v0.1.55) recognizes its CMake generator and requires `cc` 1.2.46, which requires `find-msvc-tools` 0.1.5 or newer. The lockfile uses those versions, with the minimum compatible `find-msvc-tools` version. This fixes `whisper-rs-sys` failing with `couldn't determine visual studio generator` without forcing a generator or downgrading the runner.
+
+Rust cache jobs also run for Rust-related pull requests and manual CI runs. Cache saving remains restricted to the main ref.
 
 #### Where are my recordings stored?
 

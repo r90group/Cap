@@ -110,7 +110,9 @@ pub fn copy_bgra_to_rgba(data: &[u8], stride: usize, width: usize, height: usize
         let src = &row[..row_len];
         let dst = &mut frame_buffer[dst_offset..dst_offset + row_len];
 
-        for (d, s) in dst.chunks_exact_mut(32).zip(src.chunks_exact(32)) {
+        let (dst_chunks, dst_remainder) = dst.as_chunks_mut::<32>();
+        let (src_chunks, src_remainder) = src.as_chunks::<32>();
+        for (d, s) in dst_chunks.iter_mut().zip(src_chunks) {
             d[0] = s[2];
             d[1] = s[1];
             d[2] = s[0];
@@ -145,11 +147,9 @@ pub fn copy_bgra_to_rgba(data: &[u8], stride: usize, width: usize, height: usize
             d[31] = s[31];
         }
 
-        let processed = (row_len / 32) * 32;
-        for (d, s) in dst[processed..]
-            .chunks_exact_mut(4)
-            .zip(src[processed..].chunks_exact(4))
-        {
+        let (dst_pixels, _) = dst_remainder.as_chunks_mut::<4>();
+        let (src_pixels, _) = src_remainder.as_chunks::<4>();
+        for (d, s) in dst_pixels.iter_mut().zip(src_pixels) {
             d[0] = s[2];
             d[1] = s[1];
             d[2] = s[0];

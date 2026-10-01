@@ -30,11 +30,6 @@ async function main() {
 	let cargoConfigContents = BASE_CARGO_TOML;
 	const sccachePath = await findExecutable("sccache");
 
-	if (sccachePath) {
-		cargoConfigContents += `\n[build]\nrustc-wrapper = "${sccachePath.replaceAll("\\", "/")}"\n`;
-		console.log(`Using sccache at ${sccachePath}`);
-	} else console.log("sccache not found, using rustc directly");
-
 	if (process.platform === "darwin") {
 		const NATIVE_DEPS_VERSION = "v0.25";
 		const NATIVE_DEPS_URL = `https://github.com/spacedriveapp/native-deps/releases/download/${NATIVE_DEPS_VERSION}`;
@@ -168,22 +163,21 @@ async function main() {
 		);
 		console.log("Copied ffmpeg/lib and ffmpeg/include to target/native-deps");
 
-		const { stdout: vcInstallDir } = await exec(
-			// biome-ignore lint/suspicious/noTemplateCurlyInString: PowerShell syntax, not JS template literal
-			'$(& "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -property installationPath)',
-			{ shell: "powershell.exe" },
-		);
+		const clangPath = env.CLANG_PATH || (await findExecutable("clang"));
+		if (!clangPath)
+			throw new Error(
+				"clang not found; install standalone LLVM 20 or set CLANG_PATH",
+			);
 
-		const libclangPath = path.join(
-			vcInstallDir.trim(),
-			"VC/Tools/LLVM/x64/bin/libclang.dll",
-		);
+		const llvmBinPath = path.dirname(clangPath).replaceAll("\\", "/");
 
-		cargoConfigContents += `LIBCLANG_PATH = "${libclangPath.replaceAll(
-			"\\",
-			"/",
-		)}"\n`;
+		cargoConfigContents += `LIBCLANG_PATH = "${llvmBinPath}/libclang.dll"\nCLANG_PATH = "${clangPath.replaceAll("\\", "/")}"\n`;
 	}
+
+	if (sccachePath) {
+		cargoConfigContents += `\n[build]\nrustc-wrapper = "${sccachePath.replaceAll("\\", "/")}"\n`;
+		console.log(`Using sccache at ${sccachePath}`);
+	} else console.log("sccache not found, using rustc directly");
 
 	await fs.mkdir(path.join(__root, ".cargo"), { recursive: true });
 	await fs.writeFile(
