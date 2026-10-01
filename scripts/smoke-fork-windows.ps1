@@ -1,9 +1,11 @@
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force smoke | Out-Null
 Get-Content artifacts/SHA256SUMS | ForEach-Object {
-    $parts = $_ -split '  ', 2
-    $actual = (Get-FileHash (Join-Path artifacts $parts[1]) -Algorithm SHA256).Hash.ToLower()
-    if ($actual -ne $parts[0]) { throw "Published checksum mismatch: $($parts[1])" }
+    if ($_ -notmatch '^([0-9a-f]{64}) [ *](.+)$') { throw 'Invalid published checksum inventory line' }
+    $expectedHash = $Matches[1]
+    $name = $Matches[2]
+    $actual = (Get-FileHash (Join-Path artifacts $name) -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expectedHash) { throw "Published checksum mismatch: $name" }
 }
 $manifest = Get-Content artifacts/release-x86_64-pc-windows-msvc.json | ConvertFrom-Json
 if ($manifest.revision -ne $env:RELEASE_SHA) { throw 'Published revision mismatch' }

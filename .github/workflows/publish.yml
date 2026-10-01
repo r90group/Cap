@@ -360,6 +360,7 @@ jobs:
               return (await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: releaseId, name: 'latest.json', data: Buffer.from(text), headers: { 'content-type': 'application/json' } })).data;
             };
             await github.rest.repos.updateRelease({ owner, repo, release_id: candidate.id, draft: false, body: `R90 fork desktop ${version} from ${sha}. Installed-artifact smoke passed on macOS Apple Silicon and Windows x64: https://github.com/${owner}/${repo}/actions/runs/${context.runId}. macOS is ad-hoc signed, not notarized; Windows is not Authenticode signed. Updater signatures and signed SHA256SUMS are included.` });
+            await writeManifest(candidate.id, latest, false);
             const downloads = candidate.assets.filter(a => a.name.endsWith('.dmg') || a.name.endsWith('.exe')).map(a => `- [${a.name}](${a.browser_download_url})`).join('\n');
             const body = `Healthy R90 fork desktop ${version} from [${sha}](https://github.com/${owner}/${repo}/commit/${sha}).\n\n${downloads}\n\n[All artifacts, updater signatures and checksums](${candidate.html_url}).\n\nInstalled-artifact smoke passed on macOS Apple Silicon and Windows x64: https://github.com/${owner}/${repo}/actions/runs/${context.runId}\n\nThe fork updater uses this release's latest.json and the existing fork signing key. Legacy clients embedding the upstream endpoint/key must install the current fork installer once.\n\nmacOS is ad-hoc signed, not notarized; Windows is not Authenticode signed. Existing first-launch OS consent remains required.`;
             let previousRelease;
@@ -388,7 +389,6 @@ jobs:
               const progression = compareVersions(version, previous.version);
               if (progression < 0 || (previousSha !== sha && progression === 0)) throw new Error('Candidate would not update the installed client');
             }
-            await writeManifest(candidate.id, latest, false);
             const previousName = previousRelease?.name || 'Previous healthy internal build';
             const previousBody = previousRelease?.body;
             if (legacy) {
