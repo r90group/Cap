@@ -77,3 +77,4 @@ All Rust code must respect these workspace-level lints defined in `Cargo.toml`:
 ## Code Formatting
 - Always format code before completing work: run `pnpm format` for TypeScript/JavaScript and `cargo fmt` for Rust.
 - Run these commands regularly during development and always at the end of a coding session to ensure consistent formatting.
+Run `upkeep where` before dispatching.
