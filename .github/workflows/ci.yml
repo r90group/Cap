@@ -280,3 +280,21 @@ jobs:
       - name: Run Clippy
         if: ${{ matrix.settings.target == 'aarch64-apple-darwin' || matrix.settings.target == 'x86_64-pc-windows-msvc' }}
         run: cargo clippy --workspace --all-features --locked --target ${{ matrix.settings.target }} -- -D warnings
+
+  ci-pass:
+    name: CI Pass
+    if: always()
+    needs:
+      - changes
+      - typecheck
+      - format-biome
+      - format-rust
+      - clippy
+      - lint-biome
+      - build-desktop
+      - tauri-plugins
+      - rust-cache
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then exit 1; fi
