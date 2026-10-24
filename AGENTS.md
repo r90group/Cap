@@ -15,6 +15,10 @@
 - Docker: `pnpm docker:up | docker:stop | docker:clean`.
 - Quality: `pnpm lint`, `pnpm format`, `pnpm typecheck`. Rust: `cargo build -p <crate>`, `cargo test -p <crate>`.
 
+## Merging
+- `main` merges through the GitHub merge queue (ruleset `main merge queue (tier 2 battery, aggregate gate)`): approve the PR, then `gh pr merge <n> --squash --auto`, or run `safe-merge r90group/Cap <n>`. The queue runs the full CI battery on the queued commit and requires the single `CI Pass` check, which aggregates every job in `.github/workflows/ci.yml`; add any new job to its `needs` list.
+- Never `gh pr merge --admin`.
+
 ## Fork Release
 - Normal review and CI precede merge. Successful push CI on `main` starts `.github/workflows/publish.yml` for that exact revision; there is no per-release human gate.
 - The owning procedure is [Our Deployment](README.md#our-deployment). Targets are the R90 fork's macOS Apple Silicon and Windows x64 desktop installers; the existing Railway runtime integration remains separate.
